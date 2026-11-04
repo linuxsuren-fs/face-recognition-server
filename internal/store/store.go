@@ -387,8 +387,16 @@ func (s *Store) UpdateEmployee(ctx context.Context, id int64, update EmployeeUpd
 	return s.GetEmployee(ctx, id)
 }
 
-// DeleteEmployee removes the profile; templates cascade.
+// DeleteEmployee removes the profile; templates cascade, and any stranger
+// tracks pointing at this employee are unlinked first.
 func (s *Store) DeleteEmployee(ctx context.Context, id int64) error {
+	// clear stranger track references before deleting (no ON DELETE SET NULL
+	// in SQLite's ALTER TABLE, so we do it manually)
+	if _, err := s.db.ExecContext(ctx,
+		"UPDATE stranger_tracks SET promoted_employee_id = NULL WHERE promoted_employee_id = ?",
+		id); err != nil {
+		return err
+	}
 	result, err := s.db.ExecContext(ctx, "DELETE FROM employees WHERE id = ?", id)
 	if err != nil {
 		return err

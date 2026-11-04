@@ -148,3 +148,25 @@ func TestTemplateLifecycleAndMatchProjection(t *testing.T) {
 		t.Fatalf("templates must cascade with the employee: %v %+v", err, matches)
 	}
 }
+
+func TestDeletePromotedStrangerEmployee(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+
+	// create a stranger track and promote it to an employee
+	embedding := []float32{1, 0, 0}
+	track, err := store.CreateStrangerTrack(ctx, embedding, []byte{1}, "image/jpeg", 0.9)
+	if err != nil {
+		t.Fatalf("creating track: %v", err)
+	}
+	employee, err := store.PromoteStranger(ctx, track.ID, "STRANGER-1", "未知-1", "sface:test")
+	if err != nil {
+		t.Fatalf("promoting: %v", err)
+	}
+
+	// deleting the promoted employee must not hit the FK constraint from
+	// stranger_tracks.promoted_employee_id
+	if err := store.DeleteEmployee(ctx, employee.ID); err != nil {
+		t.Fatalf("delete promoted stranger employee: %v", err)
+	}
+}
