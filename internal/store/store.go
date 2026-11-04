@@ -185,6 +185,21 @@ CREATE TABLE IF NOT EXISTS system_settings (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS stranger_tracks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    embedding BLOB NOT NULL,
+    embedding_dim INTEGER NOT NULL,
+    image BLOB,
+    image_mime_type TEXT,
+    quality_score REAL,
+    appearance_count INTEGER NOT NULL DEFAULT 1,
+    promoted_employee_id INTEGER REFERENCES employees(id),
+    promoted_at TEXT,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_stranger_tracks_promoted
+    ON stranger_tracks(promoted_employee_id);
 `)
 	if err != nil {
 		return fmt.Errorf("migrating database: %w", err)

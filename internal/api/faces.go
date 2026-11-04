@@ -415,7 +415,74 @@ func (api *facesAPI) analyze(ctx context.Context, img *engine.Image) (map[string
 		summary[payload.Result.Status]++
 		payloads = append(payloads, payload)
 	}
+
+	// auto-track strangers: unknown faces that keep appearing get their own
+	// library entry after enough sightings
+	api.trackStrangers(ctx, img, faces, payloads)
+
 	return map[string]any{"faces": payloads, "summary": summary}, nil
+}
+
+// trackStrangers feeds every unknown face into the stranger tracker.
+func (api *facesAPI) trackStrangers(ctx context.Context,
+	img *engine.Image, faces []engine.ExtractedFace, payloads []facePayload) {
+	setting := api.store.GetSettingBool(ctx, "stranger_tracking", true)
+	if !setting {
+		return
+	}
+	promotionCount := int(api.store.GetSettingFloat(ctx, "stranger_promotion_count",
+		float64(recognizer.DefaultStrangerPromotionCount)))
+
+	tracker := &recognizer.StrangerTracker{
+		Store:          api.store,
+		KnowmThreshold: api.config.KnownThreshold,
+	}
+	for i, face := range faces {
+		if i >= len(payloads) || face.Embedding == nil {
+			continue
+		}
+		if payloads[i].Result.Status != "unknown" {
+			continue
+		}
+		// encode the face region for the track record
+		box := face.Face.BBoxXYXY
+		x1 := clampInt(int(box[0]), 0, img.Width)
+		y1 := clampInt(int(box[1]), 0, img.Height)
+		x2 := clampInt(int(box[2]), 0, img.Width)
+		y2 := clampInt(int(box[3]), 0, img.Height)
+		if x2 <= x1 || y2 <= y1 {
+			continue
+		}
+		crop := img.Crop(x1, y1, x2, y2)
+		jpeg, err := engine.EncodeJPEG(crop, 80)
+		if err != nil {
+			continue
+		}
+		track, employee, err := tracker.Track(ctx,
+			face.Embedding, jpeg, "image/jpeg",
+			face.Quality.Score, promotionCount)
+		if err != nil {
+			api.logger.Warn("[faces][stranger] tracking failed",
+				"error", err, "track_id", track.ID)
+			continue
+		}
+		if employee != nil {
+			// promoted: update the face payload to reflect the new match
+			api.logger.Info("[faces][stranger] promoted",
+				"employee_no", employee.EmployeeNo, "name", employee.Name,
+				"appearances", track.AppearanceCount)
+			payloads[i].Result = recognizer.Result{
+				Status:              "known",
+				EmployeeID:          employee.ID,
+				EmployeeNo:          employee.EmployeeNo,
+				Name:                employee.Name,
+				Similarity:          1.0,
+				CandidateEmployeeID: employee.ID,
+				CandidateEmployeeNo: employee.EmployeeNo,
+				CandidateName:       employee.Name,
+			}
+		}
+	}
 }
 
 // ---- helpers ----
@@ -601,4 +668,10 @@ func roundBox(box [4]float32) [4]float32 {
 		float32(float64(int64(float64(box[2])*100+0.5)) / 100),
 		float32(float64(int64(float64(box[3])*100+0.5)) / 100),
 	}
+}
+
+func clampInt(v, low, high int) int {
+	if v < low { return low }
+	if v > high { return high }
+	return v
 }

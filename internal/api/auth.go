@@ -887,6 +887,12 @@ func (api *authAPI) getSettings(w http.ResponseWriter, r *http.Request) {
 	if _, exists := settings["liveness_threshold"]; !exists {
 		settings["liveness_threshold"] = 0.3
 	}
+	if _, exists := settings["stranger_tracking"]; !exists {
+		settings["stranger_tracking"] = true
+	}
+	if _, exists := settings["stranger_promotion_count"]; !exists {
+		settings["stranger_promotion_count"] = float64(recognizer.DefaultStrangerPromotionCount)
+	}
 	writeJSON(w, http.StatusOK, settings)
 }
 
@@ -906,6 +912,16 @@ func (api *authAPI) updateSettings(w http.ResponseWriter, r *http.Request) {
 	if value, exists := body["liveness_threshold"]; exists {
 		if threshold, ok := value.(float64); ok && threshold >= 0 && threshold <= 1 {
 			allowed["liveness_threshold"] = threshold
+		}
+	}
+	if value, exists := body["stranger_tracking"]; exists {
+		if enabled, ok := value.(bool); ok {
+			allowed["stranger_tracking"] = enabled
+		}
+	}
+	if value, exists := body["stranger_promotion_count"]; exists {
+		if count, ok := value.(float64); ok && count >= 2 && count <= 20 {
+			allowed["stranger_promotion_count"] = int(count)
 		}
 	}
 	if len(allowed) == 0 {
