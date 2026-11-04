@@ -64,6 +64,24 @@ func TestFaceLoginFlow(t *testing.T) {
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("face bind status = %d body %s", recorder.Code, recorder.Body.String())
 	}
+
+	// a second user trying to bind the SAME face must get 409
+	hash, _ := auth.HashPassword("user2-pw")
+	if _, err := h.store.CreateUser(t.Context(), "bob", "Bob", hash, "user", true); err != nil {
+		t.Fatalf("creating bob: %v", err)
+	}
+	h2 := &authHarness{handler: h.handler, store: h.store}
+	h2.login(t, "bob", "user2-pw")
+	dupRequest := multipartRequest("/api/v1/me/faces", "image", tinyPNG(t), nil)
+	dupRequest.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: h2.cookie})
+	dupRecorder := httptest.NewRecorder()
+	h.handler.ServeHTTP(dupRecorder, dupRequest)
+	if dupRecorder.Code != http.StatusConflict {
+		t.Fatalf("duplicate face bind status = %d body %s", dupRecorder.Code, dupRecorder.Body.String())
+	}
+	if !strings.Contains(dupRecorder.Body.String(), "admin") {
+		t.Fatalf("conflict message should mention the existing account: %s", dupRecorder.Body.String())
+	}
 	if strings.Contains(recorder.Body.String(), "Embedding") {
 		t.Fatalf("raw embedding must not leak in JSON: %s", recorder.Body.String())
 	}
@@ -88,10 +106,10 @@ func TestFaceLoginFlow(t *testing.T) {
 
 	// an account with no bound face cannot face-login
 	other := &fakeEngine{faces: []engine.ExtractedFace{goodFace()}}
-	h2 := newAuthHarness(t, other)
+	h3 := newAuthHarness(t, other)
 	attempt := multipartRequest("/api/v1/auth/face-login", "image", tinyPNG(t), nil)
 	reject := httptest.NewRecorder()
-	h2.handler.ServeHTTP(reject, attempt)
+	h3.handler.ServeHTTP(reject, attempt)
 	if reject.Code != http.StatusUnauthorized {
 		t.Fatalf("no face bound must be rejected, got %d", reject.Code)
 	}

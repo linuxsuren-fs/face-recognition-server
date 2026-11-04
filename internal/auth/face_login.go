@@ -66,6 +66,23 @@ func (s *Service) FaceLogin(ctx context.Context, image *engine.Image,
 	return token, user, bestScore, nil
 }
 
+// CheckFaceDuplicate reports whether the given embedding matches a face
+// already bound to a different account (above the known threshold).
+// Returns the conflicting username and true if found.
+func (s *Service) CheckFaceDuplicate(ctx context.Context,
+	embedding []float32, excludeUserID int64, threshold float64) (string, bool, error) {
+	others, err := s.Store.AllOtherUserFaces(ctx, excludeUserID)
+	if err != nil {
+		return "", false, err
+	}
+	for _, other := range others {
+		if score := maxCosine(embedding, other.Embedding); score >= threshold {
+			return other.Username, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 // maxCosine compares two little-endian float32 blobs.
 func maxCosine(query []float32, blob []byte) float64 {
 	if len(blob) != len(query)*4 {

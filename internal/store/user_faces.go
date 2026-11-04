@@ -103,13 +103,23 @@ func (s *Store) ListUserFaces(ctx context.Context, userID int64) ([]UserFace, er
 
 // AllUserFaces loads every sample of enabled accounts for face login.
 func (s *Store) AllUserFaces(ctx context.Context) ([]UserFace, error) {
+	return s.allUserFaces(ctx, 0)
+}
+
+// AllOtherUserFaces loads every sample of enabled accounts except the given
+// user — used to reject binding a face that already belongs to someone else.
+func (s *Store) AllOtherUserFaces(ctx context.Context, excludeUserID int64) ([]UserFace, error) {
+	return s.allUserFaces(ctx, excludeUserID)
+}
+
+func (s *Store) allUserFaces(ctx context.Context, excludeUserID int64) ([]UserFace, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT f.id, f.user_id, f.embedding, f.embedding_dim, f.image, f.image_mime_type,
 		       f.model_version, f.quality_score, f.created_at, u.username
 		FROM user_faces f
 		JOIN users u ON u.id = f.user_id
-		WHERE u.enabled = 1
-		ORDER BY f.id`)
+		WHERE u.enabled = 1 AND (? = 0 OR f.user_id != ?)
+		ORDER BY f.id`, excludeUserID, excludeUserID)
 	if err != nil {
 		return nil, err
 	}

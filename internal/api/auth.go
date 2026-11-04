@@ -328,6 +328,18 @@ func (api *authAPI) addMyFace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
+	// reject binding a face that already belongs to another account
+	conflict, duplicated, err := api.auth.CheckFaceDuplicate(r.Context(),
+		face.Embedding, user.ID, api.deps.Config.KnownThreshold)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "查重失败，请稍后重试")
+		return
+	}
+	if duplicated {
+		writeError(w, http.StatusConflict,
+			"该人脸已绑定到账号 "+conflict+"，同一张脸只能绑定一个账号")
+		return
+	}
 	created, err := api.deps.Store.AddUserFace(r.Context(), user.ID, store.UserFaceEnrollment{
 		Embedding:     face.Embedding,
 		ModelVersion:  api.deps.Engine.ModelVersion(),
