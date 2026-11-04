@@ -787,12 +787,11 @@ func (api *authAPI) trackExternalStranger(ctx context.Context,
 	if err != nil {
 		return
 	}
-	track, employee, err := tracker.Track(ctx,
+	_, employee, err := tracker.Track(ctx,
 		face.Embedding, jpeg, "image/jpeg",
 		face.Quality.Score, promotionCount)
 	if err != nil {
-		api.deps.Logger.Warn("[external][stranger] tracking failed",
-			"error", err, "track_id", track.ID)
+		api.deps.Logger.Warn("[external][stranger] tracking failed", "error", err)
 		return
 	}
 	if employee != nil {

@@ -462,8 +462,7 @@ func (api *facesAPI) trackStrangers(ctx context.Context,
 			face.Embedding, jpeg, "image/jpeg",
 			face.Quality.Score, promotionCount)
 		if err != nil {
-			api.logger.Warn("[faces][stranger] tracking failed",
-				"error", err, "track_id", track.ID)
+			api.logger.Warn("[faces][stranger] tracking failed", "error", err)
 			continue
 		}
 		if employee != nil {
