@@ -13,6 +13,8 @@ const settings = reactive({liveness_enabled: false, liveness_threshold: 0.3})
 
 const userFormOpen = ref(false)
 const userForm = reactive({username: '', display_name: '', password: '', role: 'user'})
+const editFormOpen = ref(false)
+const editUser = reactive({id: 0, username: '', display_name: '', role: 'user'})
 const tokenFormOpen = ref(false)
 const tokenForm = reactive({name: '', scopes: []})
 const issuedToken = ref('')
@@ -109,6 +111,28 @@ async function toggleUser(user) {
   }
 }
 
+function openEdit(user) {
+  editUser.id = user.id
+  editUser.username = user.username
+  editUser.display_name = user.display_name || ''
+  editUser.role = user.role
+  editFormOpen.value = true
+}
+
+async function saveEdit() {
+  try {
+    await adminApi.updateUser(editUser.id, {
+      display_name: editUser.display_name.trim(),
+      role: editUser.role,
+    })
+    setNotice(`用户 ${editUser.username} 已更新`)
+    editFormOpen.value = false
+    await loadUsers()
+  } catch (error) {
+    setNotice(friendlyError(error))
+  }
+}
+
 async function resetPassword(user) {
   const password = window.prompt(`为 ${user.username} 设置新密码`)
   if (!password) return
@@ -179,23 +203,39 @@ onMounted(() => {
         </select>
         <button type="submit">创建</button>
       </form>
+      <form v-if="editFormOpen" class="inline-form" @submit.prevent="saveEdit">
+        <input :value="editUser.username" disabled placeholder="用户名" />
+        <input v-model="editUser.display_name" placeholder="显示名" />
+        <select v-model="editUser.role" aria-label="角色">
+          <option value="user">普通用户</option>
+          <option value="admin">管理员</option>
+        </select>
+        <button type="submit">保存</button>
+        <button type="button" @click="editFormOpen = false">取消</button>
+      </form>
       <table>
         <thead>
-          <tr><th>用户名</th><th>显示名</th><th>角色</th><th>状态</th><th>操作</th></tr>
+          <tr><th>用户名</th><th>显示名</th><th>角色</th><th>人脸</th><th>状态</th><th>操作</th></tr>
         </thead>
         <tbody>
           <tr v-for="user in users" :key="user.id">
             <td>{{ user.username }}</td>
             <td>{{ user.display_name || '—' }}</td>
             <td>{{ user.role === 'admin' ? '管理员' : '普通用户' }}</td>
+            <td>
+              <span v-if="user.face_count > 0">{{ user.face_count }} 张</span>
+              <span v-else class="muted">未绑定</span>
+            </td>
             <td>{{ user.enabled ? '启用' : '停用' }}</td>
             <td class="ops">
+              <button class="link" @click="openEdit(user)">编辑</button>
               <button class="link" @click="toggleUser(user)">{{ user.enabled ? '停用' : '启用' }}</button>
               <button class="link" @click="resetPassword(user)">重置密码</button>
             </td>
           </tr>
         </tbody>
       </table>
+      <p class="muted" style="margin-top: 8px">用户登录后可在顶栏「我的人脸」页面录入自己的人脸（用于刷脸登录）。</p>
     </section>
 
     <section class="panel">

@@ -18,6 +18,7 @@ type User struct {
 	Enabled     bool   `json:"enabled"`
 	OidcLinked  bool   `json:"oidc_linked"`
 	PasswordSet bool   `json:"password_set"`
+	FaceCount   int    `json:"face_count"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
@@ -82,10 +83,11 @@ func (s *Store) ListUsers(ctx context.Context, page, pageSize int) ([]User, int,
 		return nil, 0, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, username, display_name, role, enabled,
-		       password_hash IS NOT NULL AND password_hash != '',
-		       oidc_sub IS NOT NULL, created_at, updated_at
-		FROM users ORDER BY id LIMIT ? OFFSET ?`,
+		SELECT u.id, u.username, u.display_name, u.role, u.enabled,
+		       u.password_hash IS NOT NULL AND u.password_hash != '',
+		       u.oidc_sub IS NOT NULL, u.created_at, u.updated_at,
+		       (SELECT COUNT(*) FROM user_faces f WHERE f.user_id = u.id)
+		FROM users u ORDER BY u.id LIMIT ? OFFSET ?`,
 		pageSize, (page-1)*pageSize)
 	if err != nil {
 		return nil, 0, err
@@ -96,7 +98,8 @@ func (s *Store) ListUsers(ctx context.Context, page, pageSize int) ([]User, int,
 		var user User
 		var displayName sql.NullString
 		if err := rows.Scan(&user.ID, &user.Username, &displayName, &user.Role, &user.Enabled,
-			&user.PasswordSet, &user.OidcLinked, &user.CreatedAt, &user.UpdatedAt); err != nil {
+			&user.PasswordSet, &user.OidcLinked, &user.CreatedAt, &user.UpdatedAt,
+			&user.FaceCount); err != nil {
 			return nil, 0, err
 		}
 		user.DisplayName = displayName.String
