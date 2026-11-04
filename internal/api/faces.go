@@ -434,8 +434,8 @@ func (api *facesAPI) trackStrangers(ctx context.Context,
 		float64(recognizer.DefaultStrangerPromotionCount)))
 
 	tracker := &recognizer.StrangerTracker{
-		Store:          api.store,
-		KnowmThreshold: api.config.KnownThreshold,
+		Store:        api.store,
+		ModelVersion: api.engine.ModelVersion(),
 	}
 	for i, face := range faces {
 		if i >= len(payloads) || face.Embedding == nil {
@@ -671,7 +671,11 @@ func roundBox(box [4]float32) [4]float32 {
 }
 
 func clampInt(v, low, high int) int {
-	if v < low { return low }
-	if v > high { return high }
+	if v < low {
+		return low
+	}
+	if v > high {
+		return high
+	}
 	return v
 }

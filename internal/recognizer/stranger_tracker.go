@@ -12,13 +12,19 @@ import (
 // unknown face needs before it is auto-enrolled.
 const DefaultStrangerPromotionCount = 3
 
+// StrangerTrackThreshold is the cosine similarity for grouping consecutive
+// sightings of the same unknown person; deliberately lower than the known
+// threshold because cross-sighting embedding variation (lighting, angle)
+// is larger than same-session variation.
+const StrangerTrackThreshold = 0.35
+
 // StrangerTracker accumulates unknown faces and promotes them to employees
 // after enough appearances.
 type StrangerTracker struct {
 	Store *store.Store
-	// KnownThreshold is the cosine similarity above which two stranger
-	// sightings belong to the same person.
-	KnowmThreshold float64
+	// ModelVersion is the engine's model identifier, stored on promoted
+	// templates so they participate in normal recognition.
+	ModelVersion string
 }
 
 // Track processes one unknown face: finds or creates a stranger track, and
@@ -47,7 +53,7 @@ func (t *StrangerTracker) Track(ctx context.Context,
 		}
 	}
 
-	if bestTrack != nil && bestScore >= t.KnowmThreshold {
+	if bestTrack != nil && bestScore >= StrangerTrackThreshold {
 		// same stranger seen again: increment
 		if err := t.Store.IncrementStrangerTrack(ctx, bestTrack.ID,
 			image, mimeType, quality); err != nil {
@@ -55,7 +61,8 @@ func (t *StrangerTracker) Track(ctx context.Context,
 		}
 		bestTrack.AppearanceCount++
 		if bestTrack.AppearanceCount >= promotionCount {
-			// promote to employee
+			// promote to employee with the correct model version so the
+			// template participates in normal recognition
 			count, err := t.Store.CountStrangerEmployees(ctx)
 			if err != nil {
 				return bestTrack, nil, err
@@ -63,7 +70,7 @@ func (t *StrangerTracker) Track(ctx context.Context,
 			name := fmt.Sprintf("未知-%d", count+1)
 			employeeNo := fmt.Sprintf("STRANGER-%d", count+1)
 			employee, err := t.Store.PromoteStranger(ctx, bestTrack.ID,
-				employeeNo, name)
+				employeeNo, name, t.ModelVersion)
 			if err != nil {
 				return bestTrack, nil, err
 			}
@@ -73,7 +80,7 @@ func (t *StrangerTracker) Track(ctx context.Context,
 	}
 
 	// new stranger: create a track
-	track, _, err := t.Store.FindOrCreateStrangerTrack(ctx,
+	track, err := t.Store.CreateStrangerTrack(ctx,
 		embedding, image, mimeType, quality)
 	if err != nil {
 		return nil, nil, err

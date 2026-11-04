@@ -30,43 +30,11 @@ type StrangerSighting struct {
 	QualityScore float64
 }
 
-// FindOrCreateStrangerTrack looks up a track whose embedding is similar
-// enough (caller pre-computes similarity via the embedding blob) or creates
-// a new one. Returns the track and whether it was newly created.
-func (s *Store) FindOrCreateStrangerTrack(ctx context.Context,
-	embedding []float32, image []byte, mimeType string, quality float64) (*StrangerTrack, bool, error) {
+// CreateStrangerTrack stores a new unknown-face sighting. The caller is
+// responsible for matching against existing tracks before calling this.
+func (s *Store) CreateStrangerTrack(ctx context.Context,
+	embedding []float32, image []byte, mimeType string, quality float64) (*StrangerTrack, error) {
 	blob := encodeFloat32(embedding)
-
-	// find the best matching un-promoted track
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, embedding, embedding_dim, appearance_count, first_seen, last_seen
-		FROM stranger_tracks
-		WHERE promoted_employee_id IS NULL
-		ORDER BY id`)
-	if err != nil {
-		return nil, false, err
-	}
-	defer rows.Close()
-	type candidate struct {
-		id   int64
-		blob []byte
-	}
-	var candidates []candidate
-	for rows.Next() {
-		var c candidate
-		if err := rows.Scan(&c.id, &c.blob, new(int), new(int), new(int), new(string)); err != nil {
-			return nil, false, err
-		}
-		candidates = append(candidates, c)
-	}
-	rows.Close()
-
-	// caller does the similarity comparison; here we just need the blobs
-	// so we return them via the embedding field. For simplicity, the
-	// service layer will iterate and compare.
-	_ = blob
-
-	// no match found: create a new track
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO stranger_tracks
 		    (embedding, embedding_dim, appearance_count, image, image_mime_type,
@@ -74,11 +42,11 @@ func (s *Store) FindOrCreateStrangerTrack(ctx context.Context,
 		VALUES (?, ?, 1, ?, ?, ?, ?, ?)`,
 		blob, len(embedding), image, mimeType, quality, utcNow(), utcNow())
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	id, err := result.LastInsertId()
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	return &StrangerTrack{
 		ID:              id,
@@ -87,7 +55,7 @@ func (s *Store) FindOrCreateStrangerTrack(ctx context.Context,
 		AppearanceCount: 1,
 		FirstSeen:       utcNow(),
 		LastSeen:        utcNow(),
-	}, true, nil
+	}, nil
 }
 
 // ListUnpromotedStrangerTracks returns all tracks that have not been
@@ -131,9 +99,10 @@ func (s *Store) IncrementStrangerTrack(ctx context.Context, id int64,
 }
 
 // PromoteStranger converts a track into a regular employee with a face
-// sample, and marks the track as promoted.
+// sample (using the real model version so it participates in recognition),
+// and marks the track as promoted.
 func (s *Store) PromoteStranger(ctx context.Context, trackID int64,
-	employeeNo, name string) (*Employee, error) {
+	employeeNo, name, modelVersion string) (*Employee, error) {
 	// read the track
 	row := s.db.QueryRowContext(ctx, `
 		SELECT embedding, embedding_dim, image, image_mime_type, quality_score
@@ -156,11 +125,11 @@ func (s *Store) PromoteStranger(ctx context.Context, trackID int64,
 		return nil, err
 	}
 
-	// add the face sample
+	// add the face sample with the correct model version
 	vector := decodeFloat32(embedding)
 	_, err = s.AddTemplate(ctx, employee.ID, Enrollment{
 		Embedding:     vector,
-		ModelVersion:  "stranger_track",
+		ModelVersion:  modelVersion,
 		QualityScore:  quality.Float64,
 		Image:         image,
 		ImageMimeType: mimeType.String,

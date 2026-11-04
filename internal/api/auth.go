@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -145,6 +146,10 @@ func (api *authAPI) faceLogin(w http.ResponseWriter, r *http.Request) {
 		api.deps.Engine, api.deps.Config.KnownThreshold)
 	if err != nil {
 		api.deps.Logger.Info("[auth][face-login] failed", "reason", err.Error())
+		// track unknown faces that appear at the login page
+		if errors.Is(err, auth.ErrFaceNotMatched) || errors.Is(err, auth.ErrNoFaceBound) {
+			api.trackLoginStranger(r, image)
+		}
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
@@ -730,8 +735,70 @@ func (api *authAPI) identify(w http.ResponseWriter, r *http.Request, _ *store.AP
 	if matches == nil {
 		matches = []recognizer.RankedMatch{}
 	}
+
+	// track strangers: no match means an unregistered person
+	if len(matches) == 0 && api.deps.Store.GetSettingBool(r.Context(), "stranger_tracking", true) {
+		api.trackExternalStranger(r.Context(), faces[0], image)
+	}
+
 	response["matches"] = matches
 	writeJSON(w, http.StatusOK, response)
+}
+
+// trackLoginStranger feeds a face that failed platform login into the
+// stranger tracker so recurring unknown visitors are eventually enrolled.
+func (api *authAPI) trackLoginStranger(r *http.Request, img *engine.Image) {
+	setting := api.deps.Store.GetSettingBool(r.Context(), "stranger_tracking", true)
+	if !setting || api.deps.Engine == nil {
+		return
+	}
+	faces, err := api.deps.Engine.Extract(img)
+	if err != nil || len(faces) == 0 || faces[0].Embedding == nil {
+		return
+	}
+	api.trackExternalStranger(r.Context(), faces[0], img)
+}
+
+// trackExternalStranger feeds one unknown face into the stranger tracker
+// (shared helper for identify and face-login).
+func (api *authAPI) trackExternalStranger(ctx context.Context,
+	face engine.ExtractedFace, img *engine.Image) {
+	setting := api.deps.Store.GetSettingBool(ctx, "stranger_tracking", true)
+	if !setting {
+		return
+	}
+	promotionCount := int(api.deps.Store.GetSettingFloat(ctx, "stranger_promotion_count",
+		float64(recognizer.DefaultStrangerPromotionCount)))
+	tracker := &recognizer.StrangerTracker{
+		Store:        api.deps.Store,
+		ModelVersion: api.deps.Engine.ModelVersion(),
+	}
+	// crop the face region for storage
+	box := face.Face.BBoxXYXY
+	x1 := clampInt(int(box[0]), 0, img.Width)
+	y1 := clampInt(int(box[1]), 0, img.Height)
+	x2 := clampInt(int(box[2]), 0, img.Width)
+	y2 := clampInt(int(box[3]), 0, img.Height)
+	if x2 <= x1 || y2 <= y1 {
+		return
+	}
+	crop := img.Crop(x1, y1, x2, y2)
+	jpeg, err := engine.EncodeJPEG(crop, 80)
+	if err != nil {
+		return
+	}
+	track, employee, err := tracker.Track(ctx,
+		face.Embedding, jpeg, "image/jpeg",
+		face.Quality.Score, promotionCount)
+	if err != nil {
+		api.deps.Logger.Warn("[external][stranger] tracking failed",
+			"error", err, "track_id", track.ID)
+		return
+	}
+	if employee != nil {
+		api.deps.Logger.Info("[external][stranger] promoted",
+			"employee_no", employee.EmployeeNo, "name", employee.Name)
+	}
 }
 
 // enroll registers a face for a subject from an external system.
